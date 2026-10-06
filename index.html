@@ -6,8 +6,9 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="robots" content="noindex">
 <link rel="stylesheet" href="lib/leaflet.css">
-<style>
-  /* Password screen for the website copy. The app itself is in app.enc, encrypted with the password. */
+<style id="gateStyle">
+  /* Password screen for the website copy. The app itself is in app.enc, encrypted with the password.
+     These rules are removed when the app opens, so they can't restyle it. */
   html,body{height:100%;margin:0;background:#0b1117;color:#e6e9ee;font:14px/1.45 system-ui,"Segoe UI",Roboto,sans-serif}
   #gate{min-height:100%;display:flex;align-items:center;justify-content:center;padding:16px;box-sizing:border-box;
     background:radial-gradient(1200px 600px at 50% -10%,#1b2633 0%,#0b1117 60%)}
@@ -78,6 +79,8 @@
     });
   }
   function launch(p) {
+    var gs = document.getElementById('gateStyle');
+    if (gs) gs.remove();
     var st = document.createElement('style');
     st.textContent = p.css;
     document.head.appendChild(st);
