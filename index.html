@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>RXP Visual Guide Builder</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<link rel="stylesheet" href="lib/leaflet.css">
+<style>
+  /* Password screen for the website copy. The app itself is in app.enc, encrypted with the password. */
+  html,body{height:100%;margin:0;background:#0b1117;color:#e6e9ee;font:14px/1.45 system-ui,"Segoe UI",Roboto,sans-serif}
+  #gate{min-height:100%;display:flex;align-items:center;justify-content:center;padding:16px;box-sizing:border-box;
+    background:radial-gradient(1200px 600px at 50% -10%,#1b2633 0%,#0b1117 60%)}
+  .card{width:100%;max-width:360px;background:#121a23;border:1px solid #243140;border-radius:12px;padding:26px 24px 20px;box-shadow:0 20px 60px rgba(0,0,0,.5)}
+  .brand{display:flex;align-items:baseline;gap:8px;margin-bottom:4px}
+  .logo{font-weight:800;color:#1a1205;background:#f0b35a;padding:2px 7px;border-radius:5px;letter-spacing:.5px}
+  .sub{color:#ffcf7a;font-weight:700;font-size:16px}
+  p{color:#8a97a8;margin:6px 0 18px}
+  label{display:block;font-size:12px;color:#8a97a8;margin-bottom:5px}
+  input[type=password]{width:100%;box-sizing:border-box;background:#0d151d;color:#e6e9ee;border:1px solid #2e3e51;border-radius:7px;padding:9px 10px;font:inherit;outline:none}
+  input[type=password]:focus{border-color:#f0b35a}
+  .row{display:flex;align-items:center;gap:7px;margin:12px 0 16px;color:#8a97a8;font-size:13px;cursor:pointer;user-select:none}
+  .row input{accent-color:#f0b35a;margin:0}
+  button{width:100%;background:#f0b35a;color:#1a1205;border:0;border-radius:7px;padding:10px;font-family:inherit;font-size:14px;font-weight:600;cursor:pointer}
+  button:hover{background:#ffcf7a}
+  button:disabled{opacity:.6;cursor:default}
+  .msg{min-height:20px;margin-top:10px;font-size:13px;color:#ff8a8a}
+  .msg.ok{color:#8a97a8}
+  .foot{margin-top:14px;padding-top:12px;border-top:1px solid #243140;color:#5d6a7b;font-size:11.5px}
+</style>
+</head>
+<body>
+<div id="gate">
+  <form class="card" id="gateForm" autocomplete="on">
+    <div class="brand"><span class="logo">RXP</span><span class="sub">Visual Guide Builder</span></div>
+    <p>Build RestedXP leveling guides for WoW Forever on the world map. Enter the password to open it.</p>
+    <input type="text" name="username" value="rxp-guide-builder" autocomplete="username" hidden>
+    <label for="pw">Password</label>
+    <input type="password" id="pw" autocomplete="current-password" required autofocus>
+    <label class="row"><input type="checkbox" id="remember" checked> Remember me on this computer</label>
+    <button type="submit" id="go">Unlock</button>
+    <div class="msg" id="msg" role="status"></div>
+    <div class="foot">Free fan tool. Guide data from RestedXP (CC BY-NC-SA 4.0), map art © Blizzard Entertainment.</div>
+  </form>
+</div>
+
+<script src="lib/leaflet.js"></script>
+<script src="data/meta.js"></script>
+<script src="data/zones.js"></script>
+<script src="data/quests.js"></script>
+<script src="data/library/index.js"></script>
+<script>
+(function () {
+  'use strict';
+  var KEY_STORE = 'rxpb.siteKey.v1';
+  var form = document.getElementById('gateForm'), pw = document.getElementById('pw'),
+    go = document.getElementById('go'), msg = document.getElementById('msg'), remember = document.getElementById('remember');
+  var b64 = function (s) { return Uint8Array.from(atob(s), function (c) { return c.charCodeAt(0); }); };
+  var toB64 = function (buf) { var s = '', a = new Uint8Array(buf); for (var i = 0; i < a.length; i++) s += String.fromCharCode(a[i]); return btoa(s); };
+  function say(t, ok) { msg.textContent = t; msg.className = 'msg' + (ok ? ' ok' : ''); }
+  function store(k, v) { try { if (v === null) localStorage.removeItem(k); else localStorage.setItem(k, v); } catch (e) { } }
+  function load(k) { try { return localStorage.getItem(k); } catch (e) { return null; } }
+
+  var encPromise = fetch('app.enc', { cache: 'no-cache' }).then(function (r) {
+    if (!r.ok) throw new Error('missing');
+    return r.json();
+  });
+
+  function deriveKey(password, enc) {
+    return crypto.subtle.importKey('raw', new TextEncoder().encode(password), 'PBKDF2', false, ['deriveKey']).then(function (base) {
+      return crypto.subtle.deriveKey({ name: 'PBKDF2', salt: b64(enc.salt), iterations: enc.iter, hash: 'SHA-256' },
+        base, { name: 'AES-GCM', length: 256 }, true, ['decrypt']);
+    });
+  }
+  function decrypt(key, enc) {
+    return crypto.subtle.decrypt({ name: 'AES-GCM', iv: b64(enc.iv) }, key, b64(enc.ct)).then(function (pt) {
+      return JSON.parse(new TextDecoder().decode(pt));
+    });
+  }
+  function launch(p) {
+    var st = document.createElement('style');
+    st.textContent = p.css;
+    document.head.appendChild(st);
+    document.getElementById('gate').remove();
+    document.body.insertAdjacentHTML('afterbegin', p.html);
+    p.scripts.concat(p.inline.map(function (code, i) { return { src: 'inline-' + i + '.js', code: code }; })).forEach(function (s) {
+      var el = document.createElement('script');
+      el.textContent = s.code + '\n//# sourceURL=' + s.src;
+      document.body.appendChild(el);
+    });
+  }
+
+  // a remembered key opens the app without asking; it stops working when the password changes
+  var saved = load(KEY_STORE);
+  if (saved) {
+    encPromise.then(function (enc) {
+      return crypto.subtle.importKey('raw', b64(saved), { name: 'AES-GCM' }, false, ['decrypt']).then(function (key) { return decrypt(key, enc); });
+    }).then(launch, function () { store(KEY_STORE, null); });
+  }
+
+  form.addEventListener('submit', function (e) {
+    e.preventDefault();
+    if (!pw.value) return;
+    go.disabled = true; say('Unlocking…', true);
+    encPromise.then(function (enc) {
+      return deriveKey(pw.value, enc).then(function (key) {
+        return decrypt(key, enc).then(function (p) {
+          if (remember.checked) return crypto.subtle.exportKey('raw', key).then(function (raw) { store(KEY_STORE, toB64(raw)); return p; });
+          store(KEY_STORE, null);
+          return p;
+        });
+      });
+    }).then(launch, function (err) {
+      go.disabled = false;
+      if (err && err.message === 'missing') say('This site is not set up yet: app.enc is missing.');
+      else { say('Wrong password.'); pw.select(); }
+    });
+  });
+})();
+</script>
+</body>
+</html>
